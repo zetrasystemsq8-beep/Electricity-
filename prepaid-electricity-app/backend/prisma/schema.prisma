@@ -1,0 +1,401 @@
+// Prepaid Electricity Assistant - Data Model
+// Covers every entity in the build brief section 39, plus the fields needed
+// to make sections 23 (live vs estimated), 26 (transaction engine) and
+// 40 (immutable transaction history) actually work.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// USERS & AUTH
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  phoneNumber  String   @unique
+  fullName     String
+  passwordHash String
+  role         Role     @default(CUSTOMER)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  meters          Meter[]
+  purchases       Purchase[]
+  alerts          Alert[]
+  budgets         Budget[]
+  supportTickets  SupportTicket[]
+  notifications   Notification[]
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+  SUPPORT_AGENT
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+// ---------------------------------------------------------------------------
+// DISCOS & METER MODELS (reference data)
+// ---------------------------------------------------------------------------
+
+model Disco {
+  id           String  @id @default(uuid())
+  name         String  @unique   // e.g. "Ikeja Electric"
+  shortCode    String  @unique   // e.g. "ikeja-electric" - used to call providers
+  region       String?
+  isActive     Boolean @default(true)
+
+  meters Meter[]
+}
+
+model MeterModel {
+  id                 String  @id @default(uuid())
+  manufacturer       String
+  modelName          String
+  meterType          MeterType
+  balanceCheckSteps  String  // JSON-encoded ordered list of steps, verified content only
+  tokenLoadSteps     String  // JSON-encoded ordered list of steps, verified content only
+  verifiedSource     String? // citation / documentation reference for the steps above
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  meters Meter[]
+
+  @@unique([manufacturer, modelName])
+}
+
+enum MeterType {
+  SINGLE_PHASE
+  THREE_PHASE
+  UNKNOWN
+}
+
+// ---------------------------------------------------------------------------
+// METERS
+// ---------------------------------------------------------------------------
+
+model Meter {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+
+  label            String   // "My Home", "My Shop", etc (section 11)
+  meterNumber      String
+  discoId          String
+  disco            Disco    @relation(fields: [discoId], references: [id])
+  meterModelId     String?
+  meterModel       MeterModel? @relation(fields: [meterModelId], references: [id])
+
+  customerName     String?  // returned by provider verification
+  address          String?
+  meterType        MeterType @default(UNKNOWN)
+  minimumPurchase  Float?
+  phoneNumber      String?
+
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  verifiedAt         DateTime?
+  verificationRaw    String?  // raw provider verification payload, for support/debug
+
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  purchases        Purchase[]
+  tokens           Token[]
+  usageRecords     UsageRecord[]
+  balanceSnapshots BalanceSnapshot[]
+  alerts           Alert[]
+  budgets          Budget[]
+  appliances       Appliance[]
+
+  @@unique([meterNumber, discoId])
+  @@index([userId])
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// PURCHASES / TRANSACTIONS / PAYMENTS  (sections 6, 7, 26, 27, 40)
+// ---------------------------------------------------------------------------
+
+model Purchase {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id])
+  meterId           String
+  meter             Meter    @relation(fields: [meterId], references: [id])
+
+  amountRequested   Float    // what the customer typed / tapped
+  createdAt         DateTime @default(now())
+
+  transaction       TransactionRecord?
+  token             Token?
+}
+
+// TransactionRecord is intentionally append-only (see database rule #40).
+// Status changes are tracked via TransactionEvent rows, never by mutating
+// the amount/token/units fields after creation.
+model TransactionRecord {
+  id                    String   @id @default(uuid())
+  purchaseId            String   @unique
+  purchase              Purchase @relation(fields: [purchaseId], references: [id])
+
+  internalRef           String   @unique   // our own idempotency key
+  providerTransactionId String?            // set once the provider responds
+  providerName          String
+
+  amountPaid            Float?             // confirmed by payment processor
+  electricityCreditRaw  Float?             // exactly what the provider says was electricity value - never invented
+  otherChargesRaw       Float?             // exactly what the provider says was fees - never invented
+  unitsKwh              Float?             // units confirmed by provider, if supplied
+  currency              String   @default("NGN")
+
+  status                TransactionStatus @default(PENDING)
+  failureReason         String?
+
+  paymentReference      String?
+  reconciliationStatus  ReconciliationStatus @default(UNRECONCILED)
+
+  createdAt             DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  events                TransactionEvent[]
+  payment               Payment?
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  SUCCESSFUL
+  FAILED
+  REVERSED
+  REFUNDED
+}
+
+enum ReconciliationStatus {
+  UNRECONCILED
+  MATCHED
+  MISMATCHED
+}
+
+// Immutable event log - this is how a transaction's status "changes" per rule #40.
+model TransactionEvent {
+  id              String   @id @default(uuid())
+  transactionId   String
+  transaction     TransactionRecord @relation(fields: [transactionId], references: [id])
+  fromStatus      TransactionStatus?
+  toStatus        TransactionStatus
+  note            String?
+  raw             String?  // raw provider/webhook payload for audit trail
+  createdAt       DateTime @default(now())
+}
+
+model Payment {
+  id              String   @id @default(uuid())
+  transactionId   String   @unique
+  transaction     TransactionRecord @relation(fields: [transactionId], references: [id])
+
+  processor       String   // e.g. "paystack"
+  processorRef    String   @unique
+  amount          Float
+  status          PaymentStatus @default(INITIATED)
+  webhookVerified Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+enum PaymentStatus {
+  INITIATED
+  SUCCESSFUL
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// TOKENS  (sections 8, 9, 37)
+// ---------------------------------------------------------------------------
+
+model Token {
+  id              String   @id @default(uuid())
+  purchaseId      String   @unique
+  purchase        Purchase @relation(fields: [purchaseId], references: [id])
+  meterId         String
+  meter           Meter    @relation(fields: [meterId], references: [id])
+
+  tokenValue      String   // the actual 20-digit STS token
+  units           Float?
+  amount          Float
+  loadingStatus   TokenLoadingStatus @default(UNKNOWN)
+  savedOffline    Boolean  @default(true)
+
+  createdAt       DateTime @default(now())
+}
+
+enum TokenLoadingStatus {
+  UNKNOWN
+  NOT_LOADED
+  LOADED
+}
+
+// ---------------------------------------------------------------------------
+// USAGE / ESTIMATION  (sections 14, 15, 23, 42, 43)
+// ---------------------------------------------------------------------------
+
+// A snapshot of what we believe the meter balance is at a point in time,
+// tagged with exactly where the number came from. This is the field that
+// enforces "never call an estimate live" (section 23).
+model BalanceSnapshot {
+  id           String   @id @default(uuid())
+  meterId      String
+  meter        Meter    @relation(fields: [meterId], references: [id])
+
+  balanceKwh   Float
+  source       BalanceSource
+  note         String?          // e.g. "user-entered reading", "post-purchase calculation"
+  createdAt    DateTime @default(now())
+
+  @@index([meterId, createdAt])
+}
+
+enum BalanceSource {
+  LIVE_METER
+  ESTIMATED
+  USER_ENTERED_READING
+}
+
+// A consumption data point, derived either from two consecutive user
+// readings or (in future) from a live meter feed. Never fabricated.
+model UsageRecord {
+  id            String   @id @default(uuid())
+  meterId       String
+  meter         Meter    @relation(fields: [meterId], references: [id])
+
+  periodStart   DateTime
+  periodEnd     DateTime
+  kwhConsumed   Float
+  source        BalanceSource
+  createdAt     DateTime @default(now())
+
+  @@index([meterId, periodStart])
+}
+
+model Appliance {
+  id            String   @id @default(uuid())
+  meterId       String
+  meter         Meter    @relation(fields: [meterId], references: [id])
+  name          String
+  wattage       Float?
+  hoursPerDay   Float?
+  quantity      Int      @default(1)
+  createdAt     DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// ALERTS / BUDGETS / SUPPORT / NOTIFICATIONS
+// ---------------------------------------------------------------------------
+
+model Alert {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id])
+  meterId           String
+  meter             Meter    @relation(fields: [meterId], references: [id])
+
+  thresholdKwh      Float?
+  thresholdDays     Float?
+  isActive          Boolean  @default(true)
+  lastTriggeredAt   DateTime?
+  createdAt         DateTime @default(now())
+}
+
+model Budget {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  meterId        String?
+  meter          Meter?   @relation(fields: [meterId], references: [id])
+
+  monthlyLimit   Float
+  periodMonth    Int      // 1-12
+  periodYear     Int
+  createdAt      DateTime @default(now())
+
+  @@unique([userId, meterId, periodMonth, periodYear])
+}
+
+model SupportTicket {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  category     SupportCategory
+  description  String
+  status       SupportStatus @default(OPEN)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+enum SupportCategory {
+  PAYMENT_PROBLEM
+  TOKEN_PROBLEM
+  METER_PROBLEM
+  BALANCE_PROBLEM
+  WRONG_CUSTOMER_DETAILS
+  REFUND
+  OTHER
+}
+
+enum SupportStatus {
+  OPEN
+  PROCESSING
+  RESOLVED
+}
+
+model Notification {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  category   NotificationCategory
+  title      String
+  body       String
+  readAt     DateTime?
+  createdAt  DateTime @default(now())
+}
+
+enum NotificationCategory {
+  TRANSACTION
+  LOW_BALANCE
+  TOKEN
+  USAGE
+  BUDGET
+  SYSTEM
+}
+
+// ---------------------------------------------------------------------------
+// PROVIDER STATUS LOG (admin dashboard, section 28)
+// ---------------------------------------------------------------------------
+
+model ProviderCallLog {
+  id            String   @id @default(uuid())
+  providerName  String
+  operation     String   // "verify" | "vend" | "requery"
+  success       Boolean
+  latencyMs     Int
+  errorMessage  String?
+  createdAt     DateTime @default(now())
+
+  @@index([providerName, createdAt])
+}
