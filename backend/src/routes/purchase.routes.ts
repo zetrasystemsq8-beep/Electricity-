@@ -6,6 +6,7 @@ import { asyncHandler } from "../middleware/errorHandler";
 import { initiatePurchase, confirmPaymentAndVend } from "../services/purchaseService";
 import { isPaystackConfigured, env } from "../config/env";
 import { ApiError } from "../utils/apiError";
+import { getCurrentUser } from "../services/authService";
 
 const router = Router();
 router.use(requireAuth);
@@ -15,19 +16,86 @@ const initiateSchema = z.object({
   amount: z.number().positive(),
 });
 
-// Section 7: Step 1-3. Creates the pending transaction and returns what the
-// frontend needs to open the payment processor's checkout.
+/**
+ * Real call to Paystack's transaction/initialize endpoint. This is the
+ * mobile-friendly checkout path: Paystack's inline JS widget only works in
+ * a browser, so a Flutter client instead opens the returned
+ * authorization_url in an in-app webview and we catch the redirect.
+ * Never returns fabricated data - throws if Paystack isn't configured or
+ * rejects the request.
+ */
+async function initializePaystackTransaction(params: {
+  email: string;
+  amountNaira: number;
+  reference: string;
+  transactionId: string;
+  userId: string;
+}): Promise<{ authorizationUrl: string; accessCode: string }> {
+  const res = await fetch("https://api.paystack.co/transaction/initialize", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.paystack.secretKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      email: params.email,
+      amount: Math.round(params.amountNaira * 100), // kobo
+      reference: params.reference,
+      // The Flutter app's webview watches for a URL starting with this
+      // scheme and treats it as "payment attempt finished" - see
+      // flutter_app/lib/screens/payment_webview_screen.dart
+      callback_url: "https://powerpal.app/payment-callback",
+      metadata: { transactionId: params.transactionId, userId: params.userId },
+    }),
+  });
+
+  if (!res.ok) {
+    throw ApiError.providerFailure("Paystack", `HTTP ${res.status} initializing payment`);
+  }
+
+  const data = (await res.json()) as {
+    status: boolean;
+    data?: { authorization_url: string; access_code: string };
+    message?: string;
+  };
+
+  if (!data.status || !data.data) {
+    throw ApiError.providerFailure("Paystack", data.message ?? "Could not start payment.");
+  }
+
+  return { authorizationUrl: data.data.authorization_url, accessCode: data.data.access_code };
+}
+
+// Section 7: Step 1-3. Creates the pending transaction and, if Paystack is
+// configured, a real hosted checkout session for it.
 router.post(
   "/initiate",
   validateBody(initiateSchema),
   asyncHandler(async (req, res) => {
     const result = await initiatePurchase(req.user!.userId, req.body);
+
+    if (!isPaystackConfigured()) {
+      return res.status(201).json({
+        ...result,
+        paymentConfigured: false,
+        paystackPublicNote:
+          "Payment collection isn't configured yet - add PAYSTACK_SECRET_KEY to the backend .env to accept real payments.",
+      });
+    }
+
+    const user = await getCurrentUser(req.user!.userId);
+    const checkout = await initializePaystackTransaction({
+      email: `${(user as { phoneNumber: string }).phoneNumber}@powerpal.ng`,
+      amountNaira: result.amount,
+      reference: result.internalRef,
+      transactionId: result.transactionId,
+      userId: req.user!.userId,
+    });
+
     res.status(201).json({
       ...result,
-      paymentConfigured: isPaystackConfigured(),
-      paystackPublicNote: isPaystackConfigured()
-        ? undefined
-        : "Payment collection isn't configured yet - add PAYSTACK_SECRET_KEY to the backend .env to accept real payments.",
+      paymentConfigured: true,
+      checkoutUrl: checkout.authorizationUrl,
     });
   })
 );

@@ -23,9 +23,14 @@ https://paystack.com to try the full flow end-to-end before going live.
 ## Project layout
 
 ```
-backend/   Express + TypeScript + Prisma (SQLite by default)
-frontend/  React + Vite + TypeScript
+backend/      Express + TypeScript + Prisma (SQLite by default) - the API, shared by both clients below
+flutter_app/  The actual PowerPal mobile app (Flutter/Dart) - build this one for Android/iOS
+frontend/     React + Vite web version - optional, e.g. as a browser-based admin panel; not required
 ```
+
+**If you're building the Android app, go straight to `flutter_app/README.md`** —
+it has the step-by-step instructions for merging in your renamed
+`android/`/`ios/` folders and pointing the app at this backend.
 
 ## Quick start on Termux (Android)
 

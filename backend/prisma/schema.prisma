@@ -8,8 +8,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------
@@ -51,8 +52,8 @@ enum UserStatus {
 
 model Disco {
   id           String  @id @default(uuid())
-  name         String  @unique   // e.g. "Ikeja Electric"
-  shortCode    String  @unique   // e.g. "ikeja-electric" - used to call providers
+  name         String  @unique
+  shortCode    String  @unique
   region       String?
   isActive     Boolean @default(true)
 
@@ -64,9 +65,9 @@ model MeterModel {
   manufacturer       String
   modelName          String
   meterType          MeterType
-  balanceCheckSteps  String  // JSON-encoded ordered list of steps, verified content only
-  tokenLoadSteps     String  // JSON-encoded ordered list of steps, verified content only
-  verifiedSource     String? // citation / documentation reference for the steps above
+  balanceCheckSteps  String
+  tokenLoadSteps     String
+  verifiedSource     String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -90,14 +91,14 @@ model Meter {
   userId           String
   user             User     @relation(fields: [userId], references: [id])
 
-  label            String   // "My Home", "My Shop", etc (section 11)
+  label            String
   meterNumber      String
   discoId          String
   disco            Disco    @relation(fields: [discoId], references: [id])
   meterModelId     String?
   meterModel       MeterModel? @relation(fields: [meterModelId], references: [id])
 
-  customerName     String?  // returned by provider verification
+  customerName     String?
   address          String?
   meterType        MeterType @default(UNKNOWN)
   minimumPurchase  Float?
@@ -105,7 +106,7 @@ model Meter {
 
   verificationStatus VerificationStatus @default(UNVERIFIED)
   verifiedAt         DateTime?
-  verificationRaw    String?  // raw provider verification payload, for support/debug
+  verificationRaw    String?
 
   isActive         Boolean  @default(true)
   createdAt        DateTime @default(now())
@@ -130,7 +131,7 @@ enum VerificationStatus {
 }
 
 // ---------------------------------------------------------------------------
-// PURCHASES / TRANSACTIONS / PAYMENTS  (sections 6, 7, 26, 27, 40)
+// PURCHASES / TRANSACTIONS / PAYMENTS
 // ---------------------------------------------------------------------------
 
 model Purchase {
@@ -140,29 +141,26 @@ model Purchase {
   meterId           String
   meter             Meter    @relation(fields: [meterId], references: [id])
 
-  amountRequested   Float    // what the customer typed / tapped
+  amountRequested   Float
   createdAt         DateTime @default(now())
 
   transaction       TransactionRecord?
   token             Token?
 }
 
-// TransactionRecord is intentionally append-only (see database rule #40).
-// Status changes are tracked via TransactionEvent rows, never by mutating
-// the amount/token/units fields after creation.
 model TransactionRecord {
   id                    String   @id @default(uuid())
   purchaseId            String   @unique
   purchase              Purchase @relation(fields: [purchaseId], references: [id])
 
-  internalRef           String   @unique   // our own idempotency key
-  providerTransactionId String?            // set once the provider responds
+  internalRef           String   @unique
+  providerTransactionId String?
   providerName          String
 
-  amountPaid            Float?             // confirmed by payment processor
-  electricityCreditRaw  Float?             // exactly what the provider says was electricity value - never invented
-  otherChargesRaw       Float?             // exactly what the provider says was fees - never invented
-  unitsKwh              Float?             // units confirmed by provider, if supplied
+  amountPaid            Float?
+  electricityCreditRaw  Float?
+  otherChargesRaw       Float?
+  unitsKwh              Float?
   currency              String   @default("NGN")
 
   status                TransactionStatus @default(PENDING)
@@ -193,7 +191,6 @@ enum ReconciliationStatus {
   MISMATCHED
 }
 
-// Immutable event log - this is how a transaction's status "changes" per rule #40.
 model TransactionEvent {
   id              String   @id @default(uuid())
   transactionId   String
@@ -201,7 +198,7 @@ model TransactionEvent {
   fromStatus      TransactionStatus?
   toStatus        TransactionStatus
   note            String?
-  raw             String?  // raw provider/webhook payload for audit trail
+  raw             String?
   createdAt       DateTime @default(now())
 }
 
@@ -210,7 +207,7 @@ model Payment {
   transactionId   String   @unique
   transaction     TransactionRecord @relation(fields: [transactionId], references: [id])
 
-  processor       String   // e.g. "paystack"
+  processor       String
   processorRef    String   @unique
   amount          Float
   status          PaymentStatus @default(INITIATED)
@@ -226,7 +223,7 @@ enum PaymentStatus {
 }
 
 // ---------------------------------------------------------------------------
-// TOKENS  (sections 8, 9, 37)
+// TOKENS
 // ---------------------------------------------------------------------------
 
 model Token {
@@ -236,7 +233,7 @@ model Token {
   meterId         String
   meter           Meter    @relation(fields: [meterId], references: [id])
 
-  tokenValue      String   // the actual 20-digit STS token
+  tokenValue      String
   units           Float?
   amount          Float
   loadingStatus   TokenLoadingStatus @default(UNKNOWN)
@@ -252,12 +249,9 @@ enum TokenLoadingStatus {
 }
 
 // ---------------------------------------------------------------------------
-// USAGE / ESTIMATION  (sections 14, 15, 23, 42, 43)
+// USAGE / ESTIMATION
 // ---------------------------------------------------------------------------
 
-// A snapshot of what we believe the meter balance is at a point in time,
-// tagged with exactly where the number came from. This is the field that
-// enforces "never call an estimate live" (section 23).
 model BalanceSnapshot {
   id           String   @id @default(uuid())
   meterId      String
@@ -265,7 +259,7 @@ model BalanceSnapshot {
 
   balanceKwh   Float
   source       BalanceSource
-  note         String?          // e.g. "user-entered reading", "post-purchase calculation"
+  note         String?
   createdAt    DateTime @default(now())
 
   @@index([meterId, createdAt])
@@ -277,8 +271,6 @@ enum BalanceSource {
   USER_ENTERED_READING
 }
 
-// A consumption data point, derived either from two consecutive user
-// readings or (in future) from a live meter feed. Never fabricated.
 model UsageRecord {
   id            String   @id @default(uuid())
   meterId       String
@@ -330,7 +322,7 @@ model Budget {
   meter          Meter?   @relation(fields: [meterId], references: [id])
 
   monthlyLimit   Float
-  periodMonth    Int      // 1-12
+  periodMonth    Int
   periodYear     Int
   createdAt      DateTime @default(now())
 
@@ -385,13 +377,13 @@ enum NotificationCategory {
 }
 
 // ---------------------------------------------------------------------------
-// PROVIDER STATUS LOG (admin dashboard, section 28)
+// PROVIDER STATUS LOG
 // ---------------------------------------------------------------------------
 
 model ProviderCallLog {
   id            String   @id @default(uuid())
   providerName  String
-  operation     String   // "verify" | "vend" | "requery"
+  operation     String
   success       Boolean
   latencyMs     Int
   errorMessage  String?
