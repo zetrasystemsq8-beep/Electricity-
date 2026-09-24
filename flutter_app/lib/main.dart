@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'api/supabase_config.dart';
 import 'state/auth_provider.dart';
 import 'state/meter_provider.dart';
 import 'theme/app_theme.dart';
@@ -8,7 +10,14 @@ import 'screens/welcome_screen.dart';
 import 'screens/add_meter_screen.dart';
 import 'screens/home_shell.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Supabase.initialize(
+    url: SupabaseConfig.url,
+    anonKey: SupabaseConfig.anonKey,
+  );
+
   runApp(const PowerPalApp());
 }
 
@@ -33,8 +42,7 @@ class PowerPalApp extends StatelessWidget {
 }
 
 /// Root gate: shows Welcome/auth screens if signed out, otherwise decides
-/// between "add your first meter" and the main tabbed Home shell - mirrors
-/// the web app's RequireAuth + onboarding flow.
+/// between "add your first meter" and the main tabbed Home shell.
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
 

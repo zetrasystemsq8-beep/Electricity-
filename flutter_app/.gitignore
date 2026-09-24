@@ -7,4 +7,3 @@ android/local.properties
 android/key.properties
 *.iml
 .idea/
-*.jks

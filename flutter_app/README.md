@@ -1,91 +1,77 @@
 # PowerPal — Flutter app
 
-This is the Flutter client for PowerPal. It talks to the exact same
-backend as the web build (`../backend`) — nothing on the server changed
-except that `/purchases/initiate` now also returns a real Paystack
-`checkoutUrl` for the in-app webview checkout (see
-`../backend/src/routes/purchase.routes.ts`).
+Talks directly to Supabase (Auth + Database with Row Level Security) for
+everything except meter verification and payments, which go through three
+small Edge Functions that hold the secret VTpass/Paystack keys. See
+`../supabase/README.md` for deploying that side first - do that before
+running this app, since it has nothing to talk to otherwise.
 
-## 1. Bring in your Android/iOS shell from naijalearn
+## 1. Bring in your Android/iOS shell
 
-This repo does **not** ship its own `android/`/`ios/` folders — you're
-supplying those from your existing naijalearn Flutter project, renamed.
-In Termux, from wherever `naijalearn` and this project both live:
+*(Already done if you're reading this after following the earlier setup -
+`android/` and `ios/` should already be sitting next to this file, renamed
+to your real package name.)*
+
+## 2. Point the app at your Supabase project
+
+Open `lib/api/supabase_config.dart` and either edit the default values
+directly, or pass them at run time so you never have to commit real values
+to git:
 
 ```bash
-# copy the platform shells across
-cp -r ~/naijalearn/android ~/Electricity-App/flutter_app/android
-cp -r ~/naijalearn/ios ~/Electricity-App/flutter_app/ios
-
-cd ~/Electricity-App/flutter_app
-
-# rename the Kotlin package folder + file
-mkdir -p android/app/src/main/kotlin/com/powerpal/app
-mv android/app/src/main/kotlin/com/naijalearn/app/MainActivity.kt \
-   android/app/src/main/kotlin/com/powerpal/app/
-rmdir android/app/src/main/kotlin/com/naijalearn/app
-rmdir android/app/src/main/kotlin/com/naijalearn
-
-# fix the package declaration inside the file
-sed -i 's/com\.naijalearn\.app/com.powerpal.app/' \
-   android/app/src/main/kotlin/com/powerpal/app/MainActivity.kt
-
-# fix applicationId/namespace
-sed -i 's/com\.naijalearn\.app/com.powerpal.app/' android/app/build.gradle.kts
-
-# fix the visible app name
-grep -n "android:label" android/app/src/main/AndroidManifest.xml
-# then edit that line by hand to "PowerPal" (or whatever name you land on):
-#   sed -i 's/android:label="[^"]*"/android:label="PowerPal"/' android/app/src/main/AndroidManifest.xml
+flutter pub get
+flutter run \
+  --dart-define=SUPABASE_URL=https://your-project-ref.supabase.co \
+  --dart-define=SUPABASE_ANON_KEY=your-anon-key-here
 ```
 
-Swap `powerpal`/`com.powerpal.app` for your real final package name and
-app name everywhere above before you run it for real — pick this once,
-since changing a package ID after publishing to the Play Store is painful.
+Both values are in your Supabase dashboard → **Project Settings** → **API**.
+The anon key is safe to ship inside the app - Row Level Security
+(`../supabase/migrations/0002_rls.sql`) is what actually protects each
+user's data, not keeping this key secret.
 
-## 2. Point the app at your backend
-
-`lib/api/api_client.dart` reads the backend URL from a compile-time
-constant, `API_BASE_URL`, defaulting to `http://10.0.2.2:4000/api` (the
-special address an Android emulator uses to reach `localhost` on the host
-machine). Building for a real phone, pass your machine's LAN IP or your
-deployed backend's URL:
+For a release build:
 
 ```bash
-flutter run --dart-define=API_BASE_URL=http://192.168.1.42:4000/api
-```
-
-or bake it into a release build:
-
-```bash
-flutter build apk --dart-define=API_BASE_URL=https://your-deployed-backend.com/api
+flutter build apk \
+  --dart-define=SUPABASE_URL=https://your-project-ref.supabase.co \
+  --dart-define=SUPABASE_ANON_KEY=your-anon-key-here
 ```
 
 ## 3. Paystack checkout
 
-Payment now goes through Paystack's hosted checkout (real
-`transaction/initialize` call on the backend), opened in-app via
-`webview_flutter` (`lib/screens/payment_webview_screen.dart`). Make sure
-`PAYSTACK_SECRET_KEY` is set in `backend/.env`, and that the
-`callback_url` the backend sends (`https://powerpal.app/payment-callback`
-in `purchase.routes.ts`) matches what you use consistently — the webview
-intercepts any navigation starting with that prefix, pulls the
-`reference`/`trxref` param out of it, and closes itself.
+Payment goes through Paystack's hosted checkout (started by the
+`purchases-initiate` Edge Function), opened in-app via `webview_flutter`
+(`lib/screens/payment_webview_screen.dart`). The webview watches for any
+navigation starting with `https://powerpal.app/payment-callback` (set in
+`supabase/functions/purchases-initiate/index.ts`) and treats it as
+"payment attempt finished," pulling the `reference`/`trxref` param out of
+the URL.
 
 ## 4. Run it
 
 ```bash
 cd flutter_app
 flutter pub get
-flutter run --dart-define=API_BASE_URL=http://<your-backend-ip>:4000/api
+flutter run --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
 ```
+
+## Architecture note
+
+`lib/api/api_client.dart` keeps the exact same `get`/`post`/`getList`
+method signatures every screen was already written against - underneath,
+it now routes each call to either a direct Supabase table operation
+(`lib/api/supabase_repo.dart`) or one of the three Edge Functions, instead
+of hitting a REST API. No screen file needed to change when the backend
+moved off Express. `lib/state/auth_provider.dart` talks to Supabase Auth
+directly (phone+password UX kept via a synthetic
+`phone@powerpal.local` email under the hood).
 
 ## What's implemented
 
-Every screen from the web build has a Flutter equivalent: Welcome,
-Register, Login, Add/Verify Meter, Home dashboard, Buy → Confirm → Paystack
-webview → success/token screen, Token Vault, History → Receipt, Usage
-(with meter-reading input), Meter Guide, Support (self-help + tickets),
-Budget, Profile, and the Admin dashboard (Overview, Users, Transactions,
-Support). Same rule as the backend: nothing here fakes data — every screen
-calls the real API and shows real loading/error states.
+Same screen list as before: Welcome, Register, Login, Add/Verify Meter,
+Home dashboard, Buy → Confirm → Paystack webview → success/token screen,
+Token Vault, History → Receipt, Usage (with meter-reading input), Meter
+Guide, Support (self-help + tickets), Budget, Profile, and the Admin
+dashboard. See `../supabase/README.md` for two features not carried over
+in this pass (appliance estimator, provider call-log dashboard).

@@ -23,14 +23,17 @@ https://paystack.com to try the full flow end-to-end before going live.
 ## Project layout
 
 ```
-backend/      Express + TypeScript + Prisma (SQLite by default) - the API, shared by both clients below
-flutter_app/  The actual PowerPal mobile app (Flutter/Dart) - build this one for Android/iOS
-frontend/     React + Vite web version - optional, e.g. as a browser-based admin panel; not required
+supabase/     Database schema (Postgres + Row Level Security) and Edge Functions - the real backend now
+flutter_app/  The PowerPal mobile app (Flutter/Dart) - talks to Supabase directly
+backend/      The original Express/Prisma API - now optional; only needed if you still use frontend/
+frontend/     React/Vite web version - optional, still talks to backend/ if you run both
 ```
 
-**If you're building the Android app, go straight to `flutter_app/README.md`** —
-it has the step-by-step instructions for merging in your renamed
-`android/`/`ios/` folders and pointing the app at this backend.
+**Building the Android app: set up `supabase/` first (see its README),
+then `flutter_app/`.** The Express `backend/` and React `frontend/` are
+a separate, independent pair that still work together exactly as before
+if you want a browser-based admin panel too, but the Flutter app no
+longer needs either of them.
 
 ## Quick start on Termux (Android)
 
