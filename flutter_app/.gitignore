@@ -9,3 +9,5 @@ android/key.properties
 .idea/
 key.properties
 *.jks
+android/
+ios/

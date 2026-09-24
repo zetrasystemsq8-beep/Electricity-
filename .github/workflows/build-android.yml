@@ -28,10 +28,92 @@ jobs:
           flutter-version: '3.35.0'
           channel: 'stable'
 
-      # The keystore and key.properties are git-ignored on purpose (never
-      # committed - see flutter_app/.gitignore), so this build reconstructs
-      # them from GitHub Actions secrets instead. Set these up once under:
-      # repo -> Settings -> Secrets and variables -> Actions.
+      # This project ships no android/ or ios/ folder in git (they're
+      # platform scaffolding, not app code) - flutter create generates them
+      # fresh, matching whatever Flutter version this workflow uses. This
+      # avoids inheriting stale Gradle/AGP config from any other project.
+      - name: Generate Android + iOS platform folders
+        run: flutter create . --platforms=android,ios --org com.powerpal --project-name powerpal
+
+      - name: Set the real package name and app label
+        run: |
+          OLD_MAIN=$(find android/app/src/main/kotlin -name MainActivity.kt)
+          mkdir -p android/app/src/main/kotlin/com/powerpal/app
+          mv "$OLD_MAIN" android/app/src/main/kotlin/com/powerpal/app/MainActivity.kt
+          find android/app/src/main/kotlin/com/powerpal -type d -empty -delete
+          sed -i 's/^package .*/package com.powerpal.app/' android/app/src/main/kotlin/com/powerpal/app/MainActivity.kt
+          sed -i 's/android:label="[^"]*"/android:label="PowerPal"/' android/app/src/main/AndroidManifest.xml
+
+      - name: Configure release signing
+        run: |
+          cat > android/app/build.gradle.kts <<'GRADLE'
+          import java.util.Properties
+          import java.io.FileInputStream
+
+          val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+          }
+
+          plugins {
+              id("com.android.application")
+              id("kotlin-android")
+              id("dev.flutter.flutter-gradle-plugin")
+          }
+
+          android {
+              namespace = "com.powerpal.app"
+              compileSdk = flutter.compileSdkVersion
+              ndkVersion = flutter.ndkVersion
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_11
+                  targetCompatibility = JavaVersion.VERSION_11
+              }
+
+              kotlinOptions {
+                  jvmTarget = JavaVersion.VERSION_11.toString()
+              }
+
+              signingConfigs {
+                  create("release") {
+                      if (keystorePropertiesFile.exists()) {
+                          storeFile = file(keystoreProperties["storeFile"] as String)
+                          storePassword = keystoreProperties["storePassword"] as String
+                          keyAlias = keystoreProperties["keyAlias"] as String
+                          keyPassword = keystoreProperties["keyPassword"] as String
+                      }
+                  }
+              }
+
+              defaultConfig {
+                  applicationId = "com.powerpal.app"
+                  minSdk = 21
+                  targetSdk = flutter.targetSdkVersion
+                  versionCode = flutter.versionCode
+                  versionName = flutter.versionName
+                  multiDexEnabled = true
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig = signingConfigs.getByName("release")
+                      isMinifyEnabled = true
+                      isShrinkResources = true
+                      proguardFiles(
+                          getDefaultProguardFile("proguard-android-optimize.txt"),
+                          "proguard-rules.pro"
+                      )
+                  }
+              }
+          }
+
+          flutter {
+              source = "../.."
+          }
+          GRADLE
+
       - name: Reconstruct Android signing files
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/powerpal.jks
