@@ -9,6 +9,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_exception.dart';
 import 'supabase_repo.dart';
+import 'support_content.dart';
 
 class ApiClient {
   ApiClient._();
