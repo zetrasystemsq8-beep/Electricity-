@@ -95,6 +95,13 @@ jobs:
           storeFile=powerpal.jks
           PROPS
 
+      - name: Verify the keystore is readable
+        run: |
+          keytool -list -keystore android/app/powerpal.jks \
+            -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
+          || (echo "::error::The ANDROID_KEYSTORE_BASE64 secret does not decode to a valid keystore, or the password doesn't match it. Regenerate with: base64 -w0 powerpal.jks and re-paste the full output into the GitHub secret." && exit 1)
+
       - name: Install dependencies
         run: flutter pub get
 
