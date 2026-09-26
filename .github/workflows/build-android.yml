@@ -42,6 +42,12 @@ jobs:
           sed -i 's/^\(\s*applicationId = \).*/\1"com.powerpal.app"/' android/app/build.gradle.kts
           sed -i 's/^\(\s*namespace = \).*/\1"com.powerpal.app"/' android/app/build.gradle.kts
 
+      - name: Add internet permission for release builds
+        run: |
+          grep -q 'android.permission.INTERNET' android/app/src/main/AndroidManifest.xml || \
+            sed -i '/<manifest /a\    <uses-permission android:name="android.permission.INTERNET" />' android/app/src/main/AndroidManifest.xml
+          cat android/app/src/main/AndroidManifest.xml
+
       - name: Insert release signing config
         run: |
           python3 - <<'PYEOF'
@@ -100,7 +106,7 @@ jobs:
           keytool -list -keystore android/app/powerpal.jks \
             -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
             -alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
-          || (echo "::error::The ANDROID_KEYSTORE_BASE64 secret does not decode to a valid keystore, or the password doesn't match it. Regenerate with: base64 -w0 powerpal.jks and re-paste the full output into the GitHub secret." && exit 1)
+          || (echo "::error::The ANDROID_KEYSTORE_BASE64 secret does not decode to a valid keystore. Regenerate it with: base64 -w0 powerpal.jks and re-paste the full output into the GitHub secret." && exit 1)
 
       - name: Install dependencies
         run: flutter pub get
