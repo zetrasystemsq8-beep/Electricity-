@@ -13,12 +13,49 @@ import 'screens/home_shell.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Supabase.initialize(
-    url: SupabaseConfig.url,
-    anonKey: SupabaseConfig.anonKey,
-  );
+  String? startupError;
+  try {
+    await Supabase.initialize(
+      url: SupabaseConfig.url,
+      anonKey: SupabaseConfig.anonKey,
+    );
+  } catch (e) {
+    startupError = e.toString();
+  }
 
-  runApp(const PowerPalApp());
+  runApp(startupError != null ? SupabaseStartupErrorApp(message: startupError) : const PowerPalApp());
+}
+
+class SupabaseStartupErrorApp extends StatelessWidget {
+  final String message;
+  const SupabaseStartupErrorApp({super.key, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Could not connect to Supabase', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                const Text('This usually means SUPABASE_URL or SUPABASE_ANON_KEY was blank, mistyped, or corrupted when this build was made.'),
+                const SizedBox(height: 20),
+                const Text('Raw error:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                SelectableText(message),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class PowerPalApp extends StatelessWidget {
@@ -41,8 +78,6 @@ class PowerPalApp extends StatelessWidget {
   }
 }
 
-/// Root gate: shows Welcome/auth screens if signed out, otherwise decides
-/// between "add your first meter" and the main tabbed Home shell.
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
 

@@ -25,7 +25,7 @@ class _LoginScreenState extends State<LoginScreen> {
       await context.read<AuthProvider>().login(_phone.text.trim(), _password.text);
       if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
     } catch (e) {
-      setState(() => _error = e is ApiException ? e.message : 'Something went wrong. Please try again.');
+      setState(() => _error = e is ApiException ? e.message : e.toString());
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
