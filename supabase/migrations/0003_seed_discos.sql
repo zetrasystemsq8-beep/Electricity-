@@ -1,8 +1,4 @@
--- Seeds the 11 licensed Nigerian electricity distribution companies.
--- short_code values are the conventional VTpass serviceID slugs - verify
--- against VTpass's live /service-categories response before production use,
--- since providers occasionally rename these.
-insert into public.discos (name, short_code, region) values
+insert into powerpal.discos (name, short_code, region) values
   ('Abuja Electricity Distribution Company', 'abuja-electric', 'Abuja'),
   ('Benin Electricity Distribution Company', 'benin-electric', 'Edo/Delta'),
   ('Eko Electricity Distribution Company', 'eko-electric', 'Lagos (Eko)'),

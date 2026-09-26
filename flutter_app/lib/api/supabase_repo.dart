@@ -8,6 +8,13 @@ import 'support_content.dart';
 
 class SupabaseRepo {
   SupabaseClient get _sb => Supabase.instance.client;
+  // Every PowerPal table lives in its own "powerpal" Postgres schema, not
+  // "public" - this Supabase project already hosts a different app's tables
+  // in public, so .schema('powerpal') keeps every query correctly scoped.
+  // (No explicit return type here on purpose - avoids depending on the
+  // exact internal type name supabase_flutter uses for this, which has
+  // differed across versions.)
+  get _db => _sb.schema('powerpal');
   String get _uid => _sb.auth.currentUser!.id;
 
   // ---------------------------------------------------------------------
@@ -15,7 +22,7 @@ class SupabaseRepo {
   // ---------------------------------------------------------------------
 
   Future<List<Map<String, dynamic>>> listDiscos() async {
-    final rows = await _sb.from('discos').select().eq('is_active', true).order('name');
+    final rows = await _db.from('discos').select().eq('is_active', true).order('name');
     return (rows as List).map((r) => {'id': r['id'], 'name': r['name'], 'shortCode': r['short_code']}).toList();
   }
 
@@ -69,7 +76,7 @@ class SupabaseRepo {
 
   Future<double?> _averageDailyUsage(String meterId, {int days = 14}) async {
     final since = DateTime.now().subtract(Duration(days: days)).toIso8601String();
-    final rows = await _sb.from('usage_records').select().eq('meter_id', meterId).gte('period_end', since);
+    final rows = await _db.from('usage_records').select().eq('meter_id', meterId).gte('period_end', since);
     final list = (rows as List).cast<Map<String, dynamic>>();
     if (list.isEmpty) return null;
 
@@ -131,7 +138,7 @@ class SupabaseRepo {
     if (previous != null && (previous['balance_kwh'] as num).toDouble() >= balanceKwh) {
       final consumed = (previous['balance_kwh'] as num).toDouble() - balanceKwh;
       if (consumed > 0) {
-        await _sb.from('usage_records').insert({
+        await _db.from('usage_records').insert({
           'meter_id': meterId,
           'period_start': previous['created_at'],
           'period_end': snapshot['created_at'],
@@ -145,7 +152,7 @@ class SupabaseRepo {
   }
 
   Future<Map<String, dynamic>> getMeterGuide(String meterId) async {
-    final meter = await _sb.from('meters').select('*, meter_model:meter_models(*)').eq('id', meterId).eq('user_id', _uid).single();
+    final meter = await _db.from('meters').select('*, meter_model:meter_models(*)').eq('id', meterId).eq('user_id', _uid).single();
     final model = meter['meter_model'] as Map<String, dynamic>?;
     if (model == null) {
       return {
@@ -244,7 +251,7 @@ class SupabaseRepo {
   }
 
   Future<Map<String, dynamic>> setTokenLoaded(String tokenId, bool loaded) async {
-    await _sb.from('tokens').update({'loading_status': loaded ? 'LOADED' : 'NOT_LOADED'}).eq('id', tokenId);
+    await _db.from('tokens').update({'loading_status': loaded ? 'LOADED' : 'NOT_LOADED'}).eq('id', tokenId);
     return {};
   }
 
@@ -330,7 +337,7 @@ class SupabaseRepo {
 
   Future<Map<String, dynamic>?> getBudgetStatus(String? meterId) async {
     final now = DateTime.now();
-    var query = _sb.from('budgets').select().eq('user_id', _uid).eq('period_month', now.month).eq('period_year', now.year);
+    var query = _db.from('budgets').select().eq('user_id', _uid).eq('period_month', now.month).eq('period_year', now.year);
     query = meterId != null ? query.eq('meter_id', meterId) : query.isFilter('meter_id', null);
     final budget = await query.maybeSingle();
     if (budget == null) return null;
@@ -381,7 +388,7 @@ class SupabaseRepo {
   // ---------------------------------------------------------------------
 
   Future<List<Map<String, dynamic>>> listMyTickets() async {
-    final rows = await _sb.from('support_tickets').select().eq('user_id', _uid).order('created_at', ascending: false);
+    final rows = await _db.from('support_tickets').select().eq('user_id', _uid).order('created_at', ascending: false);
     return (rows as List)
         .map((r) => {
               'id': r['id'],
@@ -407,7 +414,7 @@ class SupabaseRepo {
   // ---------------------------------------------------------------------
 
   Future<List<Map<String, dynamic>>> listNotifications() async {
-    final rows = await _sb.from('notifications').select().eq('user_id', _uid).order('created_at', ascending: false).limit(50);
+    final rows = await _db.from('notifications').select().eq('user_id', _uid).order('created_at', ascending: false).limit(50);
     return (rows as List)
         .map((r) => {
               'id': r['id'],
@@ -421,7 +428,7 @@ class SupabaseRepo {
   }
 
   Future<Map<String, dynamic>> markNotificationRead(String id) async {
-    final row = await _sb.from('notifications').update({'read_at': DateTime.now().toIso8601String()}).eq('id', id).select().single();
+    final row = await _db.from('notifications').update({'read_at': DateTime.now().toIso8601String()}).eq('id', id).select().single();
     return row;
   }
 
@@ -430,17 +437,17 @@ class SupabaseRepo {
   // ---------------------------------------------------------------------
 
   Future<Map<String, dynamic>> adminOverview() async {
-    final users = await _sb.from('profiles').select('status');
+    final users = await _db.from('profiles').select('status');
     final usersList = (users as List).cast<Map<String, dynamic>>();
     final total = usersList.length;
     final active = usersList.where((u) => u['status'] == 'ACTIVE').length;
     final suspended = usersList.where((u) => u['status'] == 'SUSPENDED').length;
 
-    final meters = await _sb.from('meters').select('verification_status').eq('is_active', true);
+    final meters = await _db.from('meters').select('verification_status').eq('is_active', true);
     final metersList = (meters as List).cast<Map<String, dynamic>>();
     final verifiedMeters = metersList.where((m) => m['verification_status'] == 'VERIFIED').length;
 
-    final txns = await _sb.from('transactions').select('status, amount_paid');
+    final txns = await _db.from('transactions').select('status, amount_paid');
     final txnList = (txns as List).cast<Map<String, dynamic>>();
     final statusCounts = <String, int>{};
     double revenue = 0;
@@ -466,7 +473,7 @@ class SupabaseRepo {
   }
 
   Future<List<Map<String, dynamic>>> adminListUsers(String? status) async {
-    var query = _sb.from('profiles').select();
+    var query = _db.from('profiles').select();
     if (status != null) query = query.eq('status', status);
     final rows = await query.order('created_at', ascending: false);
     return (rows as List)
@@ -482,7 +489,7 @@ class SupabaseRepo {
   }
 
   Future<Map<String, dynamic>> adminSetUserStatus(String userId, String status) async {
-    final row = await _sb.from('profiles').update({'status': status}).eq('id', userId).select().single();
+    final row = await _db.from('profiles').update({'status': status}).eq('id', userId).select().single();
     return row;
   }
 
@@ -532,7 +539,7 @@ class SupabaseRepo {
   }
 
   Future<Map<String, dynamic>> adminSetTicketStatus(String ticketId, String status) async {
-    final row = await _sb.from('support_tickets').update({'status': status}).eq('id', ticketId).select().single();
+    final row = await _db.from('support_tickets').update({'status': status}).eq('id', ticketId).select().single();
     return row;
   }
 }

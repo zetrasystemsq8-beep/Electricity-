@@ -2,6 +2,12 @@
 // Row Level Security, which is exactly why it must never be shipped in the
 // Flutter app - it lives only in Supabase's function environment
 // (SUPABASE_SERVICE_ROLE_KEY is auto-provided to every Edge Function).
+//
+// Scoped to the "powerpal" Postgres schema, not "public" - this Supabase
+// project already hosts a different app's tables in public, so every
+// admin.from(...) call in these functions needs to target powerpal instead.
+// Safe to do at this single call site because every function only ever uses
+// this client for .from(...) database calls, never .auth or .functions.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 export function supabaseAdmin() {
@@ -9,6 +15,7 @@ export function supabaseAdmin() {
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   return createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
+    db: { schema: "powerpal" },
   });
 }
 

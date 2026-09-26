@@ -13,6 +13,7 @@ class AuthProvider extends ChangeNotifier {
   bool loading = true;
 
   SupabaseClient get _sb => Supabase.instance.client;
+  get _db => _sb.schema('powerpal');
 
   static String _syntheticEmail(String phoneNumber) {
     final cleaned = phoneNumber.replaceAll(RegExp(r'[^0-9+]'), '');
@@ -32,7 +33,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _loadProfile(String userId) async {
-    final row = await _sb.from('profiles').select().eq('id', userId).single();
+    final row = await _db.from('profiles').select().eq('id', userId).single();
     user = AppUser(
       id: row['id'] as String,
       phoneNumber: row['phone_number'] as String,

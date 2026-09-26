@@ -28,6 +28,10 @@ jobs:
           flutter-version: '3.35.0'
           channel: 'stable'
 
+      # This project ships no android/ or ios/ folder in git (they're
+      # platform scaffolding, not app code) - flutter create generates them
+      # fresh, matching whatever Flutter version this workflow uses. This
+      # avoids inheriting stale Gradle/AGP config from any other project.
       - name: Generate Android + iOS platform folders
         run: flutter create . --platforms=android,ios --org com.powerpal --project-name powerpal
 
@@ -42,12 +46,24 @@ jobs:
           sed -i 's/^\(\s*applicationId = \).*/\1"com.powerpal.app"/' android/app/build.gradle.kts
           sed -i 's/^\(\s*namespace = \).*/\1"com.powerpal.app"/' android/app/build.gradle.kts
 
+      # flutter create's generated main manifest (used for release builds)
+      # does NOT include the internet permission by default - only the
+      # debug/profile manifests get it automatically. Without this, every
+      # network call in a release APK fails with a DNS/host-lookup error
+      # that looks like a bad URL but isn't one.
       - name: Add internet permission for release builds
         run: |
           grep -q 'android.permission.INTERNET' android/app/src/main/AndroidManifest.xml || \
             sed -i '/<manifest /a\    <uses-permission android:name="android.permission.INTERNET" />' android/app/src/main/AndroidManifest.xml
           cat android/app/src/main/AndroidManifest.xml
 
+      # Deliberately NOT overwriting build.gradle.kts wholesale here - Flutter's
+      # own build tooling runs an automatic migrator against this file before
+      # every build, and replacing it with a hand-written version (even a
+      # correct one) can confuse that migrator into corrupting the file with
+      # stale template text. Instead we make small, targeted insertions into
+      # whatever Flutter itself just generated, so the file's overall shape
+      # stays exactly what Flutter expects.
       - name: Insert release signing config
         run: |
           python3 - <<'PYEOF'
@@ -91,6 +107,10 @@ jobs:
           PYEOF
           cat android/app/build.gradle.kts
 
+      # The keystore and key.properties are git-ignored on purpose (never
+      # committed), so this build reconstructs them from GitHub Actions
+      # secrets. Set these up once under:
+      # repo -> Settings -> Secrets and variables -> Actions.
       - name: Reconstruct Android signing files
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/powerpal.jks
@@ -101,6 +121,9 @@ jobs:
           storeFile=powerpal.jks
           PROPS
 
+      # Fail fast with a clear message here (seconds) instead of failing
+      # deep inside the packaging step after a multi-minute build if the
+      # keystore secret got corrupted/truncated when it was pasted in.
       - name: Verify the keystore is readable
         run: |
           keytool -list -keystore android/app/powerpal.jks \

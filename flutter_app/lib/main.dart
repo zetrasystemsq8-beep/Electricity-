@@ -20,6 +20,10 @@ Future<void> main() async {
       anonKey: SupabaseConfig.anonKey,
     );
   } catch (e) {
+    // If SUPABASE_URL/SUPABASE_ANON_KEY were blank, malformed, or corrupted
+    // when the app was built, fail loudly with the real reason instead of
+    // leaving the person staring at a generic "something went wrong" deeper
+    // in the app with no way to tell what's actually broken.
     startupError = e.toString();
   }
 
@@ -78,6 +82,8 @@ class PowerPalApp extends StatelessWidget {
   }
 }
 
+/// Root gate: shows Welcome/auth screens if signed out, otherwise decides
+/// between "add your first meter" and the main tabbed Home shell.
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
 

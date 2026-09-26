@@ -1,4 +1,4 @@
-# PowerPal — Smart Prepaid Electricity Assistant by zetra company 
+# PowerPal — Smart Prepaid Electricity Assistant
 
 A full-stack app: Node/Express/TypeScript/Prisma backend + React/Vite frontend.
 Every feature in the build brief is implemented as real, working code. The only
