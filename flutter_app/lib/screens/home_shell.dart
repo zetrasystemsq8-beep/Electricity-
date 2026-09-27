@@ -29,7 +29,7 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<MeterProvider>().refresh();
+      context.read<MeterProvider>().refresh().catchError((_) {});
     });
   }
 
