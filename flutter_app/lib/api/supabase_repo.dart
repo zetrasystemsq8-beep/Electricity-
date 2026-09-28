@@ -41,7 +41,7 @@ class SupabaseRepo {
   }
 
   Future<List<Map<String, dynamic>>> listMeters() async {
-    final rows = await _sb
+    final rows = await _db
         .from('meters')
         .select('*, disco:discos(*)')
         .eq('user_id', _uid)
@@ -51,7 +51,7 @@ class SupabaseRepo {
   }
 
   Future<Map<String, dynamic>> addMeter(Map<String, dynamic> body) async {
-    final row = await _sb
+    final row = await _db
         .from('meters')
         .insert({
           'user_id': _uid,
@@ -88,7 +88,7 @@ class SupabaseRepo {
   }
 
   Future<Map<String, dynamic>?> getBalance(String meterId) async {
-    final latest = await _sb
+    final latest = await _db
         .from('balance_snapshots')
         .select()
         .eq('meter_id', meterId)
@@ -116,7 +116,7 @@ class SupabaseRepo {
   }
 
   Future<Map<String, dynamic>> recordReading(String meterId, double balanceKwh) async {
-    final previous = await _sb
+    final previous = await _db
         .from('balance_snapshots')
         .select()
         .eq('meter_id', meterId)
@@ -124,7 +124,7 @@ class SupabaseRepo {
         .limit(1)
         .maybeSingle();
 
-    final snapshot = await _sb
+    final snapshot = await _db
         .from('balance_snapshots')
         .insert({
           'meter_id': meterId,
@@ -176,7 +176,7 @@ class SupabaseRepo {
   // ---------------------------------------------------------------------
 
   Future<List<Map<String, dynamic>>> listTransactions() async {
-    final rows = await _sb
+    final rows = await _db
         .from('transactions')
         .select('*, purchase:purchases!inner(amount_requested, user_id, meter:meters(label))')
         .eq('purchase.user_id', _uid)
@@ -197,7 +197,7 @@ class SupabaseRepo {
   }
 
   Future<Map<String, dynamic>> getTransaction(String id) async {
-    final r = await _sb
+    final r = await _db
         .from('transactions')
         .select(
             '*, purchase:purchases!inner(amount_requested, user_id, meter:meters(id, label, meter_number, disco:discos(name)), token:tokens(id, token_value)), events:transaction_events(to_status, note, created_at)')
@@ -230,7 +230,7 @@ class SupabaseRepo {
   }
 
   Future<List<Map<String, dynamic>>> listTokens() async {
-    final rows = await _sb
+    final rows = await _db
         .from('tokens')
         .select('*, purchase:purchases!inner(user_id), meter:meters(label, disco:discos(name))')
         .eq('purchase.user_id', _uid)
@@ -294,7 +294,7 @@ class SupabaseRepo {
 
   Future<Map<String, dynamic>> getUsageSummary(String meterId, String period) async {
     final range = _periodRange(period);
-    final rows = await _sb
+    final rows = await _db
         .from('usage_records')
         .select()
         .eq('meter_id', meterId)
@@ -345,7 +345,7 @@ class SupabaseRepo {
     final start = DateTime(now.year, now.month, 1);
     final end = DateTime(now.year, now.month + 1, 1);
 
-    var txnQuery = _sb
+    var txnQuery = _db
         .from('transactions')
         .select('amount_paid, purchase:purchases!inner(user_id, meter_id)')
         .eq('status', 'SUCCESSFUL')
@@ -369,7 +369,7 @@ class SupabaseRepo {
   Future<Map<String, dynamic>> setBudget(Map<String, dynamic> body) async {
     final now = DateTime.now();
     final meterId = body['meterId'] as String?;
-    final row = await _sb
+    final row = await _db
         .from('budgets')
         .upsert({
           'user_id': _uid,
@@ -401,7 +401,7 @@ class SupabaseRepo {
   }
 
   Future<Map<String, dynamic>> createTicket(Map<String, dynamic> body) async {
-    final row = await _sb
+    final row = await _db
         .from('support_tickets')
         .insert({'user_id': _uid, 'category': body['category'], 'description': body['description']})
         .select()
@@ -494,7 +494,7 @@ class SupabaseRepo {
   }
 
   Future<List<Map<String, dynamic>>> adminListTransactions() async {
-    final rows = await _sb
+    final rows = await _db
         .from('transactions')
         .select('*, purchase:purchases(amount_requested, meter:meters(label), user:profiles(full_name))')
         .order('created_at', ascending: false)
@@ -519,7 +519,7 @@ class SupabaseRepo {
   }
 
   Future<List<Map<String, dynamic>>> adminListTickets() async {
-    final rows = await _sb
+    final rows = await _db
         .from('support_tickets')
         .select('*, user:profiles(full_name, phone_number)')
         .order('created_at', ascending: false)
